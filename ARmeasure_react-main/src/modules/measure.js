@@ -262,4 +262,11 @@ export class MeasureManager {
     hasContent() {
         return this.points.length > 0 || this.allChains.length > 0;
     }
+
+    getPoints() {
+        // Return active points. 
+        // Note: For a full implementation we might want to include 'allChains' too, 
+        // but for now let's focus on the active measurement for the overlay.
+        return this.points;
+    }
 }

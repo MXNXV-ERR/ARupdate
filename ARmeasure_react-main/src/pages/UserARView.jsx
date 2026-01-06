@@ -12,22 +12,33 @@ const UserARView = () => {
     const [stats, setStats] = useState({ total: "0.00 m", count: 0 });
     const [arStatus, setArStatus] = useState("Initializing AR...");
     const [showPlan, setShowPlan] = useState(false);
-    const [canvasStream, setCanvasStream] = useState(null);
+    // const [canvasStream, setCanvasStream] = useState(null); // Removed for Pro Fix
 
-    // Pass canvas stream to usePeer - when AR starts, it will stream the canvas
-    const { status: peerStatus, endCall, sendData, data: remoteData, isDataConnected, toggleCamera, facingMode } = usePeer('user', code, canvasStream);
+    // Pass null instead of canvas stream - we stream camera only
+    const { status: peerStatus, endCall, sendData, data: remoteData, isDataConnected, toggleCamera, facingMode } = usePeer('user', code, null);
 
-    // Handler for when AR session starts - capture the canvas stream
+    // Data sync for Remote Overlay (Pro Fix)
     const handleSessionStart = useCallback(() => {
-        // Small delay to ensure canvas is ready and rendering
-        setTimeout(() => {
-            const stream = arSceneRef.current?.getCanvasStream(30);
-            if (stream) {
-                console.log("Canvas stream captured for WebRTC");
-                setCanvasStream(stream);
+        // Start a loop to send AR data to reviewer
+        // We do not replace the video stream anymore, to avoid freezing.
+        const intervalId = setInterval(() => {
+            if (!arSceneRef.current) return;
+
+            const screenData = arSceneRef.current.getScreenPoints();
+            if (screenData && sendData && isDataConnected) {
+                sendData({
+                    type: 'AR_OVERLAY_DATA',
+                    points: screenData.points,
+                    reticle: screenData.reticle,
+                    isClosed: screenData.isClosed,
+                    stats: stats // Send current stats too
+                });
             }
-        }, 500);
-    }, []);
+        }, 50); // 20 FPS updates
+
+        // Cleanup on unmount or session end (handled via effect teardown usually, but here we attach to session)
+        return () => clearInterval(intervalId);
+    }, [sendData, isDataConnected, stats]);
 
     const handleEndCall = () => {
         endCall();
@@ -44,6 +55,28 @@ const UserARView = () => {
                 onSessionStart={handleSessionStart}
                 onSessionEnd={() => navigate('/')}
             />
+
+            {/* Connection Status Overlay */}
+            <div style={{
+                position: 'absolute',
+                top: 80,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(0,0,0,0.6)',
+                padding: '4px 12px',
+                borderRadius: 16,
+                zIndex: 20,
+                pointerEvents: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+            }}>
+                <div style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: peerStatus.includes('Connected') ? '#4caf50' : peerStatus.includes('Error') ? '#f44336' : '#ff9800'
+                }} />
+                <span style={{ color: '#fff', fontSize: 12, fontWeight: 500 }}>{peerStatus}</span>
+            </div>
 
             {/* Overlay UI - Top Center Pill */}
             <div className="shiny-pill" style={{

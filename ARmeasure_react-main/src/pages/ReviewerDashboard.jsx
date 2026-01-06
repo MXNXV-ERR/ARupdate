@@ -8,7 +8,14 @@ const ReviewerDashboard = () => {
     const navigate = useNavigate();
     const code = searchParams.get('code');
     const { status, remoteStream, endCall, sendData, data: remoteData, isDataConnected } = usePeer('reviewer', code);
+    const [arData, setArData] = React.useState(null);
     const videoRef = useRef(null);
+
+    useEffect(() => {
+        if (remoteData && remoteData.type === 'AR_OVERLAY_DATA') {
+            setArData(remoteData);
+        }
+    }, [remoteData]);
 
     useEffect(() => {
         const video = videoRef.current;
@@ -117,17 +124,115 @@ const ReviewerDashboard = () => {
                         position: 'relative'
                     }}>
                         {remoteStream ? (
-                            <video
-                                ref={videoRef}
-                                autoPlay
-                                playsInline
-                                style={{
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: 'contain',
-                                    display: 'block'
-                                }}
-                            />
+                            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                                <video
+                                    ref={videoRef}
+                                    autoPlay
+                                    playsInline
+                                    style={{
+                                        width: '100%',
+                                        height: '100%',
+                                        objectFit: 'contain',
+                                        display: 'block'
+                                    }}
+                                />
+                                {/* AR Overlay Layer */}
+                                <svg
+                                    style={{
+                                        position: 'absolute',
+                                        top: 0,
+                                        left: 0,
+                                        width: '100%',
+                                        height: '100%',
+                                        pointerEvents: 'none',
+                                        objectFit: 'contain' // Matches video behavior? actually SVG usually fills.
+                                        // Note: If video is object-fit: contain, there might be letterboxing.
+                                        // Ideally we want to match the video rect exactly, but 100% is a good start.
+                                    }}
+                                    viewBox="0 0 100 100"
+                                    preserveAspectRatio="xMidYMid meet"
+                                >
+                                    {/* Draw Line Path */}
+                                    {arData?.points && arData.points.length > 1 && (
+                                        <>
+                                            <polyline
+                                                points={arData.points.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
+                                                fill={arData.isClosed ? "rgba(0, 123, 255, 0.2)" : "none"}
+                                                stroke="#ff0044"
+                                                strokeWidth="0.8"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            />
+                                            {/* Closed loop segment */}
+                                            {arData.isClosed && (
+                                                <line
+                                                    x1={arData.points[arData.points.length - 1].x * 100}
+                                                    y1={arData.points[arData.points.length - 1].y * 100}
+                                                    x2={arData.points[0].x * 100}
+                                                    y2={arData.points[0].y * 100}
+                                                    stroke="#ff0044"
+                                                    strokeWidth="0.8"
+                                                />
+                                            )}
+                                        </>
+                                    )}
+
+                                    {/* Draw Points */}
+                                    {arData?.points && arData.points.map((p, i) => (
+                                        <circle
+                                            key={i}
+                                            cx={p.x * 100}
+                                            cy={p.y * 100}
+                                            r="1.2"
+                                            fill="#007bff"
+                                            stroke="white"
+                                            strokeWidth="0.2"
+                                        />
+                                    ))}
+
+                                    {/* Draw Reticle */}
+                                    {arData?.reticle && (
+                                        <circle
+                                            cx={arData.reticle.x * 100}
+                                            cy={arData.reticle.y * 100}
+                                            r="1"
+                                            fill="none"
+                                            stroke="white"
+                                            strokeWidth="0.5"
+                                            strokeDasharray="1,1"
+                                            opacity="0.8"
+                                        />
+                                    )}
+                                </svg>
+
+                                {/* Remote Stats Pill */}
+                                {arData?.stats && (
+                                    <div className="shiny-pill" style={{
+                                        position: 'absolute',
+                                        top: 25,
+                                        left: '50%',
+                                        transform: 'translateX(-50%)',
+                                        padding: '8px 20px',
+                                        textAlign: 'center',
+                                        minWidth: 120,
+                                        pointerEvents: 'none',
+                                        zIndex: 10,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 2,
+                                        background: 'rgba(0,0,0,0.6)',
+                                        borderRadius: 20,
+                                        border: '1px solid rgba(255,255,255,0.2)'
+                                    }}>
+                                        <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.6)', letterSpacing: '1px', textTransform: 'uppercase' }}>USER MEASURING</div>
+                                        <div style={{
+                                            fontSize: 20, fontWeight: 700, color: '#4da6ff', display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4
+                                        }}>
+                                            {arData.stats.total}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         ) : (
                             <div style={{
                                 display: 'flex',

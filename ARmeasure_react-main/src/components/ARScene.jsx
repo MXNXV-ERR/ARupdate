@@ -42,7 +42,46 @@ const ARScene = forwardRef((props, ref) => {
             logicRef.current.measureManager?.setUnit(next);
             updateUI();
         },
-        // Get the canvas MediaStream for WebRTC streaming
+        // Get Screen Coordinates for Remote Overlay
+        getScreenPoints: () => {
+             const mgr = logicRef.current;
+             if (!mgr.sceneManager || !mgr.measureManager) return null;
+             
+             // Get points from measure manager
+             const points3D = mgr.measureManager.getPoints();
+             const camera = mgr.sceneManager.camera;
+             
+             // Project each point
+             const screenPoints = points3D.map(p => {
+                 const vector = p.clone();
+                 vector.project(camera); // Projects to NDC [-1, 1]
+                 return {
+                     x: (vector.x + 1) / 2, // Convert to [0, 1]
+                     y: -(vector.y - 1) / 2 // Convert to [0, 1] (flip Y)
+                 };
+             });
+
+             // Project reticle
+             let reticle = null;
+             if (mgr.interactionManager) {
+                 const rPos = mgr.interactionManager.getReticlePosition();
+                 if (rPos) {
+                    const vector = rPos.clone();
+                    vector.project(camera);
+                    reticle = {
+                        x: (vector.x + 1) / 2,
+                        y: -(vector.y - 1) / 2
+                    };
+                 }
+             }
+
+             return {
+                 points: screenPoints,
+                 reticle: reticle,
+                 isClosed: mgr.measureManager.isClosed
+             };
+        },
+        // Legacy: Get the canvas MediaStream (Kept for compatibility if needed, but unused in Pro fix)
         getCanvasStream: (fps = 30) => {
             return logicRef.current.sceneManager?.getCaptureStream(fps);
         }
