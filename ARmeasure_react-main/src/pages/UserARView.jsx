@@ -24,86 +24,61 @@ const UserARView = () => {
     }, []);
 
     // Pass canvasStream (Restarted Camera) if active
-    const { status: peerStatus, localStream, endCall, sendData, data: remoteData, isDataConnected, toggleCamera, facingMode } = usePeer('user', code, canvasStream);
+    const { status: peerStatus, localStream, endCall, sendData, data: remoteData, isDataConnected, toggleCamera, facingMode } = usePeer('user', code, canvasStream, viewMode === 'AR');
 
     const [viewMode, setViewMode] = useState('AR'); // 'AR' or 'VIDEO'
 
-    // Toggle Mode Handler
+    // Toggle Mode Handler - Pattern A: Simpler since WebXR/WebRTC don't conflict
     const toggleViewMode = useCallback(async () => {
         const newMode = viewMode === 'AR' ? 'VIDEO' : 'AR';
         setViewMode(newMode);
         addLog(`SWITCHING TO: ${newMode} MODE`);
 
         if (newMode === 'AR') {
-            // STOP Video Camera to enable AR
-            if (localStream) {
-                localStream.getVideoTracks().forEach(t => t.stop());
-            }
-            // Use Canvas Stream (Lines Only) for Peer
-            const stream = arSceneRef.current?.getCanvasStream(15);
-            setCanvasStream(stream);
-            addLog("Camera Released for AR.");
+            // Switch to AR mode
+            // WebXR will own the camera, WebRTC will use audio only
+            addLog("AR Mode Active - Camera released to WebXR.");
         } else {
-            // START Video Camera for Peer
-            try {
-                addLog("Starting Camera...");
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: 640 },
-                    audio: true
-                });
-                setCanvasStream(stream); // Send this to Peer
-                addLog("Camera Streaming.");
-            } catch (e) {
-                addLog("Cam Start Fail: " + e.message);
-                setViewMode('AR'); // Revert on fail
-            }
+            // Switch to VIDEO mode - but note: video is still from canvas or can be enabled
+            // For now, AR data continues via DataChannel
+            addLog("Video Mode - AR data still available via DataChannel.");
         }
-    }, [viewMode, localStream, addLog]);
+    }, [viewMode, addLog]);
 
 
 
-    // 2. Data Sync Logic (Interval)
+    // 2. Data Sync Logic (Interval) - Pattern A: Send AR data via DataChannel
     const startDataSync = useCallback(() => {
         const intervalId = setInterval(() => {
             if (!arSceneRef.current) return;
 
+            // Pattern A: Send AR data (pose + measurements) via DataChannel
+            const arData = arSceneRef.current.getARData();
             const screenData = arSceneRef.current.getScreenPoints();
-            if (screenData && sendData && isDataConnected) {
+            
+            if (arData && sendData && isDataConnected) {
                 sendData({
-                    type: 'AR_OVERLAY_DATA',
-                    points: screenData.points,
-                    segments: screenData.segments, // Include segments if available
-                    reticle: screenData.reticle,
-                    isClosed: screenData.isClosed,
-                    stats: stats
+                    type: 'AR_DATA',
+                    pose: arData.poseMatrix,
+                    measurements: arData.measurements,
+                    screenPoints: screenData,
+                    timestamp: arData.timestamp
                 });
             }
-        }, 50);
+        }, 100); // Send AR data at 10Hz for low latency
 
         return () => clearInterval(intervalId);
     }, [sendData, isDataConnected, stats]);
 
-    // Combined Handler for Session Start
+    // Combined Handler for Session Start - Pattern A: WebXR owns camera
     const handleSessionStart = useCallback(() => {
-        addLog("AR STARTED. STOPPING CAM...");
+        addLog("AR STARTED. WebXR owns camera.");
 
-        // 1. Stop the initial video call camera (Release Hardware)
-        if (localStream) {
-            localStream.getVideoTracks().forEach(track => {
-                track.stop();
-                console.log("Stopped local track:", track.kind);
-            });
-            addLog("CAM STOPPED. AR MODE ACTIVE.");
-        }
-
-        // 2. Ensure Peer gets the Canvas Stream (Lines) so connection stays alive
-        setTimeout(() => {
-            const stream = arSceneRef.current?.getCanvasStream(15);
-            if (stream) setCanvasStream(stream);
-        }, 1000);
-
+        // Pattern A: WebXR now owns the camera exclusively
+        // No need to stop WebRTC camera - it already only has audio
+        // Start sending AR data via DataChannel
         return startDataSync();
-    }, [startDataSync, localStream, addLog]);
+    }, [startDataSync, addLog]);
 
     const handleEndCall = () => {
         endCall();
@@ -163,9 +138,10 @@ const UserARView = () => {
                 onLog={addLog}
             />
 
-            {/* Local Video Preview (Visible ONLY in VIDEO Mode) */}
+            {/* Local Video/AR Canvas Preview (Visible ONLY in VIDEO Mode) */}
             <video
                 ref={ref => {
+                    // Pattern A: Show canvas stream for AR visualization or local stream
                     const activeStream = canvasStream || localStream;
                     if (ref && activeStream) {
                         ref.srcObject = activeStream;

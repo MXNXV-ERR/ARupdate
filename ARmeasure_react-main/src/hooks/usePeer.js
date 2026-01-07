@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Peer from 'peerjs';
 
-export const usePeer = (role, code, canvasStream = null) => {
+export const usePeer = (role, code, canvasStream = null, arActive = false) => {
     const [peer, setPeer] = useState(null);
     const [call, setCall] = useState(null);
     const [remoteStream, setRemoteStream] = useState(null);
@@ -14,7 +14,17 @@ export const usePeer = (role, code, canvasStream = null) => {
     const [facingMode, setFacingMode] = useState('environment');
     const [retryCount, setRetryCount] = useState(0);
 
-    function getVideoConstraints(mode) {
+    function getVideoConstraints(mode, isArActive = false) {
+        // Pattern A: If AR is active, don't request video from WebRTC
+        // WebXR owns the camera exclusively
+        if (isArActive) {
+            return {
+                audio: true,
+                video: false // No camera for WebRTC when AR is active
+            };
+        }
+        
+        // Normal video mode constraints
         const constraints = {
             facingMode: { ideal: mode },
             width: { ideal: 1280, max: 1280 },
@@ -154,15 +164,18 @@ export const usePeer = (role, code, canvasStream = null) => {
                         let stream = localStreamRef.current;
                         if (!stream) {
                             try {
-                                stream = await navigator.mediaDevices.getUserMedia({
-                                    audio: true,
-                                    video: getVideoConstraints(facingModeRef.current)
-                                });
+                                const constraints = getVideoConstraints(facingModeRef.current, arActive);
+                                // Pattern A: When AR is active, only get audio
+                                if (arActive) {
+                                    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                                } else {
+                                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                                }
                             } catch (err) {
-                                console.warn("Specific constraints failed, trying basic video:", err);
+                                console.warn("Specific constraints failed, trying basic audio:", err);
                                 stream = await navigator.mediaDevices.getUserMedia({
                                     audio: true,
-                                    video: true
+                                    video: false
                                 });
                             }
                             localStreamRef.current = stream;
@@ -173,7 +186,7 @@ export const usePeer = (role, code, canvasStream = null) => {
                         setupCallEventsRef.current(outgoingCall);
                     } catch (e) {
                         console.error("Media Error:", e);
-                        setStatus("Media Error: " + e.message + " (Check Camera)");
+                        setStatus("Media Error: " + e.message + " (Check Microphone)");
                     }
                 };
                 initiateCall();
@@ -196,10 +209,12 @@ export const usePeer = (role, code, canvasStream = null) => {
 
             p.on('call', (incomingCall) => {
                 console.log("Incoming call...", incomingCall);
-                navigator.mediaDevices.getUserMedia({
-                    audio: true,
-                    video: getVideoConstraints(facingModeRef.current)
-                })
+                // Pattern A: Get only audio when AR is active, full stream otherwise
+                const mediaConstraints = arActive 
+                    ? { audio: true }
+                    : { audio: true, video: getVideoConstraints(facingModeRef.current, false) };
+                
+                navigator.mediaDevices.getUserMedia(mediaConstraints)
                     .then(stream => {
                         localStreamRef.current = stream;
                         incomingCall.answer(stream);

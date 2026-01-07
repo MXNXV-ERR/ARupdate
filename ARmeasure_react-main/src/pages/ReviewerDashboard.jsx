@@ -9,11 +9,21 @@ const ReviewerDashboard = () => {
     const code = searchParams.get('code');
     const { status, remoteStream, endCall, sendData, data: remoteData, isDataConnected } = usePeer('reviewer', code);
     const [arData, setArData] = React.useState(null);
+    const [arMeasurements, setArMeasurements] = React.useState(null);
     const videoRef = useRef(null);
 
     useEffect(() => {
-        if (remoteData && remoteData.type === 'AR_OVERLAY_DATA') {
-            setArData(remoteData);
+        if (remoteData) {
+            // Pattern A: Handle AR_DATA message type (pose + measurements)
+            if (remoteData.type === 'AR_DATA') {
+                setArMeasurements(remoteData.measurements);
+                setArData(remoteData.screenPoints);
+                console.log("Received AR Data:", remoteData);
+            }
+            // Legacy: Handle AR_OVERLAY_DATA for backward compatibility
+            else if (remoteData.type === 'AR_OVERLAY_DATA') {
+                setArData(remoteData);
+            }
         }
     }, [remoteData]);
 
@@ -240,7 +250,7 @@ const ReviewerDashboard = () => {
                                 </svg>
 
                                 {/* Remote Stats Pill */}
-                                {arData?.stats && (
+                                {(arData?.stats || arMeasurements) && (
                                     <div className="shiny-pill" style={{
                                         position: 'absolute',
                                         top: 25,
@@ -262,8 +272,22 @@ const ReviewerDashboard = () => {
                                         <div style={{
                                             fontSize: 20, fontWeight: 700, color: '#4da6ff', display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4
                                         }}>
-                                            {arData.stats.total}
+                                            {/* Pattern A: Show AR measurements from DataChannel */}
+                                            {arMeasurements ? (
+                                                <>
+                                                    <span>{(arMeasurements.totalDistance || 0).toFixed(2)}</span>
+                                                    <span style={{ fontSize: 12 }}>{arMeasurements.unit || 'm'}</span>
+                                                </>
+                                            ) : (
+                                                arData?.stats?.total || "0.00 m"
+                                            )}
                                         </div>
+                                        {/* Show point count from AR measurements */}
+                                        {arMeasurements && (
+                                            <div style={{ fontSize: 10, color: '#fff', opacity: 0.7 }}>
+                                                {arMeasurements.pointCount} points
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>

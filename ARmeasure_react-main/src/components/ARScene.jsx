@@ -45,7 +45,41 @@ const ARScene = forwardRef((props, ref) => {
             logicRef.current.measureManager?.setUnit(next);
             updateUI();
         },
-        // Get Screen Coordinates for Remote Overlay
+        // Pattern A: Get AR Data for DataChannel transmission
+        getARData: () => {
+            const mgr = logicRef.current;
+            if (!mgr.sceneManager || !mgr.measureManager) return null;
+
+            const points3D = mgr.measureManager.getPoints();
+            const camera = mgr.sceneManager.camera;
+            const session = mgr.sceneManager.getSession();
+
+            // Extract pose matrix from XR session
+            let poseMatrix = null;
+            if (session && session.requestAnimationFrame) {
+                // Pose data would be extracted from the XR frame
+                // This is a placeholder for the actual pose extraction
+                poseMatrix = {
+                    timestamp: Date.now(),
+                    position: camera.position.toArray(),
+                    quaternion: camera.quaternion.toArray()
+                };
+            }
+
+            return {
+                poseMatrix,
+                measurements: {
+                    points: points3D.map(p => p.toArray()),
+                    totalDistance: mgr.measureManager.getTotalDistance(),
+                    area: mgr.measureManager.getArea(),
+                    isClosed: mgr.measureManager.isClosed,
+                    unit: mgr.currentUnit,
+                    pointCount: points3D.length
+                },
+                timestamp: Date.now()
+            };
+        },
+        // Pattern A: Get Screen Coordinates for Remote Overlay
         getScreenPoints: () => {
             const mgr = logicRef.current;
             if (!mgr.sceneManager || !mgr.measureManager) return null;
