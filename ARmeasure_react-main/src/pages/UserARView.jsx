@@ -12,15 +12,13 @@ const UserARView = () => {
     const [stats, setStats] = useState({ total: "0.00 m", count: 0 });
     const [arStatus, setArStatus] = useState("Initializing AR...");
     const [showPlan, setShowPlan] = useState(false);
-    // const [canvasStream, setCanvasStream] = useState(null); // Removed for Pro Fix
+    const [canvasStream, setCanvasStream] = useState(null);
 
-    // Pass null instead of canvas stream - we stream camera only
-    const { status: peerStatus, endCall, sendData, data: remoteData, isDataConnected, toggleCamera, facingMode } = usePeer('user', code, null);
+    // Pass canvasStream (Screen Share) if active, otherwise NULL (Camera)
+    const { status: peerStatus, localStream, endCall, sendData, data: remoteData, isDataConnected, toggleCamera, facingMode } = usePeer('user', code, canvasStream || null);
 
-    // Data sync for Remote Overlay (Pro Fix)
-    const handleSessionStart = useCallback(() => {
-        // Start a loop to send AR data to reviewer
-        // We do not replace the video stream anymore, to avoid freezing.
+    // 2. Data Sync Logic (Interval)
+    const startDataSync = useCallback(() => {
         const intervalId = setInterval(() => {
             if (!arSceneRef.current) return;
 
@@ -29,16 +27,25 @@ const UserARView = () => {
                 sendData({
                     type: 'AR_OVERLAY_DATA',
                     points: screenData.points,
+                    segments: screenData.segments, // Include segments if available
                     reticle: screenData.reticle,
                     isClosed: screenData.isClosed,
-                    stats: stats // Send current stats too
+                    stats: stats
                 });
             }
-        }, 50); // 20 FPS updates
+        }, 50);
 
-        // Cleanup on unmount or session end (handled via effect teardown usually, but here we attach to session)
         return () => clearInterval(intervalId);
     }, [sendData, isDataConnected, stats]);
+
+    // Combined Handler for Session Start
+    const handleSessionStart = useCallback(() => {
+        console.log("AR Session Triggered - Keeping Camera Stream Active for Reviewer");
+        // We do NOT stop the local stream. We hope the device supports Multi-Stream (WebXR + getUserMedia).
+        // If the User View goes black *again*, it's a hardware limitation, but the Reviewer requested the feed.
+
+        return startDataSync();
+    }, [startDataSync]);
 
     const handleEndCall = () => {
         endCall();
@@ -54,6 +61,31 @@ const UserARView = () => {
                 onStatsUpdate={setStats}
                 onSessionStart={handleSessionStart}
                 onSessionEnd={() => navigate('/')}
+            />
+
+            {/* Local Video Preview (Only for Initial Camera Setup) */}
+            <video
+                ref={ref => {
+                    if (ref && localStream) {
+                        ref.srcObject = localStream;
+                    }
+                }}
+                autoPlay
+                muted
+                playsInline
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    objectFit: 'cover',
+                    zIndex: -2, // CRITICAL: Place behind AR Canvas (which is usually 0 or -1)
+                    // Always show video (Manual AR Passthrough)
+                    display: 'block',
+                    pointerEvents: 'none'
+                }}
             />
 
             {/* Connection Status Overlay */}
@@ -109,7 +141,8 @@ const UserARView = () => {
             </div >
 
             {/* Top Right Controls - Power Off / End Call Icon */}
-            < div style={{ position: 'absolute', top: 20, right: 20, zIndex: 10 }}>
+            < div style={{ position: 'absolute', top: 20, right: 20, zIndex: 10, display: 'flex', gap: 10 }}>
+                {/* Manual Screen Share Trigger (if auto fails) */}
                 <button
                     onClick={handleEndCall}
                     className="glass-btn"
@@ -167,6 +200,7 @@ const UserARView = () => {
                         <line x1="10" y1="9" x2="8" y2="9"></line>
                     </svg>
                 </button>
+
                 <button
                     onClick={toggleCamera}
                     className="glass-btn"
@@ -213,6 +247,8 @@ const UserARView = () => {
                     <PlanParser role="user" sendData={sendData} remoteData={remoteData} isDataConnected={isDataConnected} />
                 </div>
             )}
+
+            {/* Overlay Removed: Canvas capture is automatic */}
 
             {/* Conditional Bottom Controls - Repositioned above STOP AR */}
             {stats.count > 0 && (

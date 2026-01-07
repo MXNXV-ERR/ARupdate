@@ -44,42 +44,69 @@ const ARScene = forwardRef((props, ref) => {
         },
         // Get Screen Coordinates for Remote Overlay
         getScreenPoints: () => {
-             const mgr = logicRef.current;
-             if (!mgr.sceneManager || !mgr.measureManager) return null;
-             
-             // Get points from measure manager
-             const points3D = mgr.measureManager.getPoints();
-             const camera = mgr.sceneManager.camera;
-             
-             // Project each point
-             const screenPoints = points3D.map(p => {
-                 const vector = p.clone();
-                 vector.project(camera); // Projects to NDC [-1, 1]
-                 return {
-                     x: (vector.x + 1) / 2, // Convert to [0, 1]
-                     y: -(vector.y - 1) / 2 // Convert to [0, 1] (flip Y)
-                 };
-             });
+            const mgr = logicRef.current;
+            if (!mgr.sceneManager || !mgr.measureManager) return null;
 
-             // Project reticle
-             let reticle = null;
-             if (mgr.interactionManager) {
-                 const rPos = mgr.interactionManager.getReticlePosition();
-                 if (rPos) {
+            // Get points from measure manager
+            const points3D = mgr.measureManager.getPoints();
+            const camera = mgr.sceneManager.camera;
+
+            // Project each point
+            const screenPoints = points3D.map(p => {
+                const vector = p.clone();
+                vector.project(camera); // Projects to NDC [-1, 1]
+                return {
+                    x: (vector.x + 1) / 2, // Convert to [0, 1]
+                    y: -(vector.y - 1) / 2 // Convert to [0, 1] (flip Y)
+                };
+            });
+
+            // Project reticle
+            let reticle = null;
+            if (mgr.interactionManager) {
+                const rPos = mgr.interactionManager.getReticlePosition();
+                if (rPos) {
                     const vector = rPos.clone();
                     vector.project(camera);
                     reticle = {
                         x: (vector.x + 1) / 2,
                         y: -(vector.y - 1) / 2
                     };
-                 }
-             }
+                }
+            }
 
-             return {
-                 points: screenPoints,
-                 reticle: reticle,
-                 isClosed: mgr.measureManager.isClosed
-             };
+            // Calculate segments with distances
+            const segments = [];
+            if (points3D.length > 1) {
+                for (let i = 0; i < points3D.length - 1; i++) {
+                    const p1 = points3D[i];
+                    const p2 = points3D[i + 1];
+                    const dist = p1.distanceTo(p2);
+                    segments.push({
+                        text: formatDistance(dist, mgr.currentUnit),
+                        startIndex: i,
+                        endIndex: i + 1
+                    });
+                }
+                // Closing segment
+                if (mgr.measureManager.isClosed) {
+                    const p1 = points3D[points3D.length - 1];
+                    const p2 = points3D[0];
+                    const dist = p1.distanceTo(p2);
+                    segments.push({
+                        text: formatDistance(dist, mgr.currentUnit),
+                        startIndex: points3D.length - 1,
+                        endIndex: 0
+                    });
+                }
+            }
+
+            return {
+                points: screenPoints,
+                segments: segments, // New: contains text labels for lines
+                reticle: reticle,
+                isClosed: mgr.measureManager.isClosed
+            };
         },
         // Legacy: Get the canvas MediaStream (Kept for compatibility if needed, but unused in Pro fix)
         getCanvasStream: (fps = 30) => {

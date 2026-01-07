@@ -152,9 +152,9 @@ const ReviewerDashboard = () => {
                                     viewBox="0 0 100 100"
                                     preserveAspectRatio="xMidYMid meet"
                                 >
-                                    {/* Draw Line Path */}
                                     {arData?.points && arData.points.length > 1 && (
                                         <>
+                                            {/* Draw Line Path */}
                                             <polyline
                                                 points={arData.points.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
                                                 fill={arData.isClosed ? "rgba(0, 123, 255, 0.2)" : "none"}
@@ -174,6 +174,40 @@ const ReviewerDashboard = () => {
                                                     strokeWidth="0.8"
                                                 />
                                             )}
+
+                                            {/* Render Measurement Text Labels (New) */}
+                                            {arData.segments && arData.segments.map((seg, i) => {
+                                                if (!arData.points[seg.startIndex] || !arData.points[seg.endIndex]) return null;
+
+                                                const start = arData.points[seg.startIndex];
+                                                const end = arData.points[seg.endIndex];
+
+                                                // Calculate midpoint
+                                                const midX = (start.x + end.x) / 2 * 100;
+                                                const midY = (start.y + end.y) / 2 * 100;
+
+                                                return (
+                                                    <g key={`seg-${i}`}>
+                                                        {/* Optional: Background pill for readability */}
+                                                        <rect
+                                                            x={midX - 12} y={midY - 4}
+                                                            width="24" height="8"
+                                                            rx="2" fill="rgba(0,0,0,0.7)"
+                                                        />
+                                                        <text
+                                                            x={midX}
+                                                            y={midY}
+                                                            fill="white"
+                                                            fontSize="3.5"
+                                                            textAnchor="middle"
+                                                            dominantBaseline="middle"
+                                                            fontWeight="bold"
+                                                        >
+                                                            {seg.text}
+                                                        </text>
+                                                    </g>
+                                                );
+                                            })}
                                         </>
                                     )}
 

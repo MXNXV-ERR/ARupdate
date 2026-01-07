@@ -119,131 +119,174 @@ export const usePeer = (role, code, canvasStream = null) => {
         const myId = role === 'reviewer' ? `${code}-reviewer` : `${code}-user`;
         const targetId = role === 'reviewer' ? `${code}-user` : `${code}-reviewer`;
 
-        console.log(`Initializing Peer with ID: ${myId}`);
-        setStatus("Connecting to Server...");
+        console.log(`Initializing Peer logic for ID: ${myId}`);
+        setStatus("Waiting for stable connection...");
 
-        const p = new Peer(myId, {
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:global.stun.twilio.com:3478' }
-                ]
-            },
-            debug: 2
-        });
+        let p = null;
+        let mountTimeout = setTimeout(() => {
+            console.log(`Creating Peer with ID: ${myId}`);
+            setStatus("Connecting to Server...");
 
+            p = new Peer(myId, {
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:global.stun.twilio.com:3478' }
+                    ]
+                },
+                debug: 2
+            });
+            peerRef.current = p;
 
+            const connectToRemote = () => {
+                if (role !== 'user' || !p || p.destroyed) return;
 
-        const connectToRemote = () => {
-            if (role !== 'user' || !p || p.destroyed) return;
+                console.log(`Attempting to connect to ${targetId}...`);
+                setStatus(`Looking for ${targetId}...`);
 
-            console.log(`Attempting to connect to ${targetId}...`);
-            setStatus(`Looking for ${targetId}...`);
+                // 1. Data Connection
+                const dataConn = p.connect(targetId);
+                setupDataEventsRef.current(dataConn);
 
-            // 1. Data Connection
-            const dataConn = p.connect(targetId);
-            setupDataEventsRef.current(dataConn);
+                // 2. Media Call
+                const initiateCall = async () => {
+                    try {
+                        let stream = localStreamRef.current;
+                        if (!stream) {
+                            try {
+                                stream = await navigator.mediaDevices.getUserMedia({
+                                    audio: true,
+                                    video: getVideoConstraints(facingModeRef.current)
+                                });
+                            } catch (err) {
+                                console.warn("Specific constraints failed, trying basic video:", err);
+                                stream = await navigator.mediaDevices.getUserMedia({
+                                    audio: true,
+                                    video: true
+                                });
+                            }
+                            localStreamRef.current = stream;
+                            audioTrackRef.current = stream.getAudioTracks()[0];
+                        }
 
-            // 2. Media Call
-            const initiateCall = async () => {
-                try {
-                    let stream = localStreamRef.current;
-                    if (!stream) {
-                        stream = await navigator.mediaDevices.getUserMedia({
-                            audio: true,
-                            video: getVideoConstraints(facingModeRef.current)
-                        });
-                        localStreamRef.current = stream;
-                        audioTrackRef.current = stream.getAudioTracks()[0];
+                        const outgoingCall = p.call(targetId, stream);
+                        setupCallEventsRef.current(outgoingCall);
+                    } catch (e) {
+                        console.error("Media Error:", e);
+                        setStatus("Media Error: " + e.message + " (Check Camera)");
                     }
-
-                    const outgoingCall = p.call(targetId, stream);
-                    setupCallEventsRef.current(outgoingCall);
-                } catch (e) {
-                    console.error("Media Error:", e);
-                    setStatus("Media Error: " + e.message + " (Check Camera)");
-                }
+                };
+                initiateCall();
             };
-            initiateCall();
-        };
 
-        p.on('open', (id) => {
-            console.log("Peer opened with ID:", id);
-            setStatus(role === 'reviewer' ? "Waiting for someone to join..." : "Ready to call...");
-            setPeer(p);
+            p.on('open', (id) => {
+                console.log("Peer opened with ID:", id);
+                setStatus(role === 'reviewer' ? "Waiting for someone to join..." : "Ready to call...");
+                setPeer(p);
 
-            if (role === 'user') {
-                connectToRemote();
-            }
-        });
-
-        p.on('connection', (dataConn) => {
-            console.log("Incoming data connection-from:", dataConn.peer);
-            setupDataEventsRef.current(dataConn);
-        });
-
-        p.on('call', (incomingCall) => {
-            console.log("Incoming call...", incomingCall);
-            navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: getVideoConstraints(facingModeRef.current)
-            })
-                .then(stream => {
-                    localStreamRef.current = stream;
-                    incomingCall.answer(stream);
-                    setupCallEventsRef.current(incomingCall);
-                    setStatus(`Call connected with ${incomingCall.peer}`);
-                })
-                .catch(err => {
-                    console.error("Failed to answer:", err);
-                    setStatus(`Error answering: ${err.message}`);
-                });
-        });
-
-        p.on('disconnected', () => {
-            setStatus("Disconnected. Retrying...");
-            p.reconnect();
-        });
-
-        p.on('error', (err) => {
-            console.error("Peer Error:", err);
-            setStatus(`Error: ${err.type}`);
-
-            // Retry logic
-            if (err.type === 'peer-unavailable' && role === 'user') {
-                setStatus(`Reviewer not ready. Retrying in 2s...`);
-                if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
-                retryTimeoutRef.current = setTimeout(() => {
-                    console.log("Retrying connection...");
+                if (role === 'user') {
                     connectToRemote();
-                }, 2000);
-            }
-            if (err.type === 'unavailable-id') {
-                setStatus("ID Conflict. Retrying in 2s...");
-                console.warn("Peer ID taken, retrying...");
-                if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
-                retryTimeoutRef.current = setTimeout(() => {
-                    setRetryCount(c => c + 1);
-                }, 2000);
-            }
-        });
+                }
+            });
+
+            p.on('connection', (dataConn) => {
+                console.log("Incoming data connection-from:", dataConn.peer);
+                setupDataEventsRef.current(dataConn);
+            });
+
+            p.on('call', (incomingCall) => {
+                console.log("Incoming call...", incomingCall);
+                navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: getVideoConstraints(facingModeRef.current)
+                })
+                    .then(stream => {
+                        localStreamRef.current = stream;
+                        incomingCall.answer(stream);
+                        setupCallEventsRef.current(incomingCall);
+                        setStatus(`Call connected with ${incomingCall.peer}`);
+                    })
+                    .catch(err => {
+                        console.error("Failed to answer:", err);
+                        setStatus(`Error answering: ${err.message}`);
+                    });
+            });
+
+            p.on('disconnected', () => {
+                setStatus("Disconnected. Retrying...");
+                p.reconnect();
+            });
+
+            p.on('error', (err) => {
+                console.error("Peer Error:", err);
+                setStatus(`Error: ${err.type}`);
+
+                // Retry logic
+                if (err.type === 'peer-unavailable' && role === 'user') {
+                    setStatus(`Reviewer not ready. Retrying in 2s...`);
+                    if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+                    retryTimeoutRef.current = setTimeout(() => {
+                        console.log("Retrying connection...");
+                        connectToRemote();
+                    }, 2000);
+                }
+                if (err.type === 'unavailable-id') {
+                    setStatus("ID Conflict. Retrying in 2s...");
+                    console.warn("Peer ID taken, retrying...");
+                    // Try to reset via retryCount
+                    if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+                    retryTimeoutRef.current = setTimeout(() => {
+                        setRetryCount(c => c + 1);
+                    }, 2000);
+                }
+            });
+        }, 1000); // 1 second debounce for Strict Mode
 
         return () => {
-            console.log("Destroying peer instance...");
+            console.log("Cleanup: Destroying peer instance or clearing timeout...");
+            clearTimeout(mountTimeout);
             if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
-            p.destroy();
-            peerRef.current = null;
+            if (p) {
+                p.destroy();
+                peerRef.current = null;
+            }
         };
     }, [role, code, retryCount]); // Re-run on retryCount change
 
-    // Replace video track with canvas stream - REMOVED
-    /*
+    // Replace video track with canvas stream
+    const replaceWithCanvasStream = useCallback(() => {
+        if (!call || !call.peerConnection || !canvasStream) return;
+
+        try {
+            const canvasVideoTrack = canvasStream.getVideoTracks()[0];
+            if (!canvasVideoTrack) {
+                console.error("No video track in canvas stream");
+                return;
+            }
+
+            const senders = call.peerConnection.getSenders();
+            const videoSender = senders.find(s => s.track?.kind === 'video');
+
+            if (videoSender) {
+                videoSender.replaceTrack(canvasVideoTrack);
+                console.log("Replaced video track with canvas/screen stream");
+                setStatus("Streaming Screen Share...");
+
+                // Note: We DO NOT stop the local camera stream here anymore. 
+                // Why? Because 'canvasStream' is now a Screen Share, which is separate.
+                // The AR session itself naturally takes over the camera.
+                // Stopping it manually might cause issues if we need to revert.
+            }
+        } catch (e) {
+            console.error("Error replacing with canvas stream:", e);
+        }
+    }, [call, canvasStream]);
+
     useEffect(() => {
         if (role === 'user' && call && call.peerConnection && canvasStream) {
             replaceWithCanvasStream();
         }
     }, [canvasStream, role, call, replaceWithCanvasStream]);
-    */
 
     const sendData = (payload) => {
         if (conn && conn.open) {
@@ -296,5 +339,5 @@ export const usePeer = (role, code, canvasStream = null) => {
         setStatus("Call Ended Manually");
     };
 
-    return { peer, call, remoteStream, status, endCall, sendData, data, isDataConnected, toggleCamera, facingMode };
+    return { peer, call, remoteStream, localStream: localStreamRef.current, status, endCall, sendData, data, isDataConnected, toggleCamera, facingMode };
 };
