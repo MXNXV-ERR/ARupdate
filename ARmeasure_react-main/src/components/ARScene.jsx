@@ -13,6 +13,9 @@ const ARScene = forwardRef((props, ref) => {
         currentUnit: 'm'
     });
 
+    // Debug variable
+    let lastLogTime = 0;
+
     const [statusText, setStatusText] = useState("Initializing AR...");
     const [stats, setStats] = useState({ total: "0.00 m", count: 0 });
 
@@ -182,6 +185,13 @@ const ARScene = forwardRef((props, ref) => {
         const mgr = logicRef.current;
         if (!mgr.interactionManager || !mgr.measureManager) return;
 
+        // Debug: Check if render loop is actually running
+        if (Math.floor(t / 1000) % 2 === 0 && Math.floor(t) !== lastLogTime) {
+            console.log("AR Render Loop Active - Frame timestamp:", t);
+            if (props.onLog) props.onLog(`Render Loop: ${Math.floor(t)}`);
+            lastLogTime = Math.floor(t);
+        }
+
         const session = mgr.sceneManager.getSession();
         mgr.interactionManager.update(frame, session);
 
@@ -192,7 +202,14 @@ const ARScene = forwardRef((props, ref) => {
         const pos = mgr.interactionManager.getReticlePosition();
         mgr.measureManager.updatePreview(pos);
 
-        // Dynamic distance update in UI pill
+        // Debug: Check tracking
+        if (Math.floor(t / 1000) % 2 === 0 && Math.floor(t) !== lastLogTime) {
+            const tracking = pos ? "TRACKING" : "NO TRACKING";
+            const frameCount = Math.floor(t);
+            console.log(`AR: ${tracking} - ${frameCount}`);
+            if (props.onLog) props.onLog(`[${frameCount}] ${tracking}`);
+            lastLogTime = frameCount;
+        }
         if (pos || mgr.measureManager.getPointCount() > 0) {
             updateUI(pos);
         }

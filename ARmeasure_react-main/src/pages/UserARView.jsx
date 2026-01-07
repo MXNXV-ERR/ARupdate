@@ -13,9 +13,54 @@ const UserARView = () => {
     const [arStatus, setArStatus] = useState("Initializing AR...");
     const [showPlan, setShowPlan] = useState(false);
     const [canvasStream, setCanvasStream] = useState(null);
+    const [logs, setLogs] = useState([]);
 
-    // Pass canvasStream (Screen Share) if active, otherwise NULL (Camera)
-    const { status: peerStatus, localStream, endCall, sendData, data: remoteData, isDataConnected, toggleCamera, facingMode } = usePeer('user', code, canvasStream || null);
+    const addLog = useCallback((msg) => {
+        setLogs(prev => {
+            const newLogs = [...prev, msg];
+            if (newLogs.length > 8) newLogs.shift();
+            return newLogs;
+        });
+    }, []);
+
+    // Pass canvasStream (Restarted Camera) if active
+    const { status: peerStatus, localStream, endCall, sendData, data: remoteData, isDataConnected, toggleCamera, facingMode } = usePeer('user', code, canvasStream);
+
+    const [viewMode, setViewMode] = useState('AR'); // 'AR' or 'VIDEO'
+
+    // Toggle Mode Handler
+    const toggleViewMode = useCallback(async () => {
+        const newMode = viewMode === 'AR' ? 'VIDEO' : 'AR';
+        setViewMode(newMode);
+        addLog(`SWITCHING TO: ${newMode} MODE`);
+
+        if (newMode === 'AR') {
+            // STOP Video Camera to enable AR
+            if (localStream) {
+                localStream.getVideoTracks().forEach(t => t.stop());
+            }
+            // Use Canvas Stream (Lines Only) for Peer
+            const stream = arSceneRef.current?.getCanvasStream(15);
+            setCanvasStream(stream);
+            addLog("Camera Released for AR.");
+        } else {
+            // START Video Camera for Peer
+            try {
+                addLog("Starting Camera...");
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: 640 },
+                    audio: true
+                });
+                setCanvasStream(stream); // Send this to Peer
+                addLog("Camera Streaming.");
+            } catch (e) {
+                addLog("Cam Start Fail: " + e.message);
+                setViewMode('AR'); // Revert on fail
+            }
+        }
+    }, [viewMode, localStream, addLog]);
+
+
 
     // 2. Data Sync Logic (Interval)
     const startDataSync = useCallback(() => {
@@ -40,12 +85,25 @@ const UserARView = () => {
 
     // Combined Handler for Session Start
     const handleSessionStart = useCallback(() => {
-        console.log("AR Session Triggered - Keeping Camera Stream Active for Reviewer");
-        // We do NOT stop the local stream. We hope the device supports Multi-Stream (WebXR + getUserMedia).
-        // If the User View goes black *again*, it's a hardware limitation, but the Reviewer requested the feed.
+        addLog("AR STARTED. STOPPING CAM...");
+
+        // 1. Stop the initial video call camera (Release Hardware)
+        if (localStream) {
+            localStream.getVideoTracks().forEach(track => {
+                track.stop();
+                console.log("Stopped local track:", track.kind);
+            });
+            addLog("CAM STOPPED. AR MODE ACTIVE.");
+        }
+
+        // 2. Ensure Peer gets the Canvas Stream (Lines) so connection stays alive
+        setTimeout(() => {
+            const stream = arSceneRef.current?.getCanvasStream(15);
+            if (stream) setCanvasStream(stream);
+        }, 1000);
 
         return startDataSync();
-    }, [startDataSync]);
+    }, [startDataSync, localStream, addLog]);
 
     const handleEndCall = () => {
         endCall();
@@ -54,20 +112,63 @@ const UserARView = () => {
 
     return (
         <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: 'transparent' }}>
+            {/* DEBUG CONSOLE OVERLAY - HIGH VISIBILITY - MOVED DOWN */}
+            <div style={{
+                position: 'absolute',
+                top: '25%', // Move down to avoid top pills
+                left: 10,
+                zIndex: 99999, // Max Z
+                pointerEvents: 'none',
+                maxWidth: '85%',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6
+            }}>
+                {/* Always show current status at top */}
+                <div style={{
+                    background: peerStatus.includes('Error') ? 'rgba(255,0,0,0.9)' : 'rgba(0,0,0,0.8)',
+                    color: '#fff', fontSize: 16, fontWeight: 'bold', padding: '8px', borderRadius: 8,
+                    border: '2px solid white'
+                }}>
+                    STATUS: {peerStatus}
+                </div>
+
+                {logs.map((log, i) => (
+                    <div key={i} style={{
+                        background: 'rgba(255, 0, 0, 0.85)', // High contrast RED
+                        color: 'white',
+                        fontSize: 16, // Larger text for mobile
+                        fontWeight: 'bold',
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        fontFamily: 'monospace',
+                        boxShadow: '0 4px 8px rgba(0,0,0,0.6)',
+                        borderLeft: '4px solid white'
+                    }}>
+                        {log}
+                    </div>
+                ))}
+            </div>
+
             {/* AR Scene in background */}
             <ARScene
                 ref={arSceneRef}
-                onStatusUpdate={setArStatus}
+                onStatusUpdate={(msg) => {
+                    setArStatus(msg);
+                    // allow status updates to log mostly, but maybe throttle?
+                }}
                 onStatsUpdate={setStats}
                 onSessionStart={handleSessionStart}
                 onSessionEnd={() => navigate('/')}
+                onLog={addLog}
             />
 
-            {/* Local Video Preview (Only for Initial Camera Setup) */}
+            {/* Local Video Preview (Visible ONLY in VIDEO Mode) */}
             <video
                 ref={ref => {
-                    if (ref && localStream) {
-                        ref.srcObject = localStream;
+                    const activeStream = canvasStream || localStream;
+                    if (ref && activeStream) {
+                        ref.srcObject = activeStream;
                     }
                 }}
                 autoPlay
@@ -80,10 +181,8 @@ const UserARView = () => {
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
-                    objectFit: 'cover',
-                    zIndex: -2, // CRITICAL: Place behind AR Canvas (which is usually 0 or -1)
-                    // Always show video (Manual AR Passthrough)
-                    display: 'block',
+                    zIndex: -2,
+                    display: viewMode === 'VIDEO' ? 'block' : 'none',
                     pointerEvents: 'none'
                 }}
             />
@@ -108,6 +207,37 @@ const UserARView = () => {
                     background: peerStatus.includes('Connected') ? '#4caf50' : peerStatus.includes('Error') ? '#f44336' : '#ff9800'
                 }} />
                 <span style={{ color: '#fff', fontSize: 12, fontWeight: 500 }}>{peerStatus}</span>
+            </div>
+
+            {/* MODE TOGGLE SWITCH - THE SOLUTION */}
+            <div style={{
+                position: 'absolute',
+                top: 130, // Below connection pill
+                right: 20,
+                zIndex: 100,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 5
+            }}>
+                <button
+                    onClick={toggleViewMode}
+                    style={{
+                        background: viewMode === 'AR' ? '#4caf50' : '#2196f3',
+                        color: 'white',
+                        border: '2px solid white',
+                        borderRadius: 12,
+                        padding: '12px 20px',
+                        fontSize: 16,
+                        fontWeight: 'bold',
+                        boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
+                        transition: 'all 0.2s'
+                    }}
+                >
+                    {viewMode === 'AR' ? '📐 MEASURING' : '📹 STREAMING'}
+                </button>
+                <div style={{ fontSize: 10, color: 'white', opacity: 0.8, background: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 4, textAlign: 'center' }}>
+                    {viewMode === 'AR' ? 'Camera: AR Only' : 'Camera: Video Call'}
+                </div>
             </div>
 
             {/* Overlay UI - Top Center Pill */}

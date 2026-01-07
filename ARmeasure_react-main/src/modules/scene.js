@@ -17,14 +17,15 @@ export class SceneManager {
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
+        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true;
         this.renderer.domElement.style.position = 'absolute';
         this.renderer.domElement.style.top = '0';
         this.renderer.domElement.style.left = '0';
-        this.renderer.domElement.style.zIndex = '0'; // Behind UI (which is 1000)
+        this.renderer.domElement.style.zIndex = '10'; // Bring Canvas to Front (Test)
+        this.renderer.domElement.style.background = 'transparent'; // Force Transparent
         document.body.appendChild(this.renderer.domElement);
 
         this.scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3));
